@@ -1,0 +1,166 @@
+services:
+
+  # ── Reverse Proxy ──────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: nas-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      NAS_DOMAIN: ${NAS_DOMAIN}
+      NEXTCLOUD_SUBDOMAIN: ${NEXTCLOUD_SUBDOMAIN}
+      IMMICH_SUBDOMAIN: ${IMMICH_SUBDOMAIN}
+      JELLYFIN_SUBDOMAIN: ${JELLYFIN_SUBDOMAIN}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${NAS_DATA_PATH}/docker/caddy/data:/data
+      - ${NAS_DATA_PATH}/docker/caddy/config:/config
+    networks:
+      - nas-net
+
+  # ── Nextcloud ──────────────────────────────────────────
+  mariadb:
+    image: mariadb:11
+    container_name: nas-mariadb
+    restart: unless-stopped
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ${NAS_DATA_PATH}/docker/mariadb:/var/lib/mysql
+    networks:
+      - nas-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis-nextcloud:
+    image: redis:7-alpine
+    container_name: nas-redis-nextcloud
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - ${NAS_DATA_PATH}/docker/redis:/data
+    networks:
+      - nas-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nextcloud:
+    image: nextcloud:29-apache
+    container_name: nas-nextcloud
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis-nextcloud:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis-nextcloud
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_SUBDOMAIN}.${NAS_DOMAIN}
+      OVERWRITEPROTOCOL: https
+      OVERWRITEHOST: ${NEXTCLOUD_SUBDOMAIN}.${NAS_DOMAIN}
+    volumes:
+      - ${NAS_DATA_PATH}/nextcloud:/var/www/html
+    networks:
+      - nas-net
+
+  # ── Immich ─────────────────────────────────────────────
+  postgres:
+    image: tensorchord/pgvecto-rs:pg16-v0.2.1
+    container_name: nas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ${NAS_DATA_PATH}/docker/postgres:/var/lib/postgresql/data
+    networks:
+      - nas-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis-immich:
+    image: redis:7-alpine
+    container_name: nas-redis-immich
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - ${NAS_DATA_PATH}/docker/redis-immich:/data
+    networks:
+      - nas-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    container_name: nas-immich-server
+    restart: unless-stopped
+    command: ["start.sh", "immich"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-immich:
+        condition: service_healthy
+    environment:
+      DB_HOSTNAME: postgres
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_DATABASE_NAME: ${POSTGRES_DB}
+      REDIS_HOSTNAME: redis-immich
+      UPLOAD_LOCATION: /usr/src/app/upload
+      IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
+    volumes:
+      - ${NAS_DATA_PATH}/immich:/usr/src/app/upload
+    networks:
+      - nas-net
+
+  immich-ml:
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    container_name: nas-immich-ml
+    restart: unless-stopped
+    volumes:
+      - ${NAS_DATA_PATH}/docker/immich/model-cache:/cache
+    networks:
+      - nas-net
+
+  # ── Jellyfin ───────────────────────────────────────────
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: nas-jellyfin
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${NAS_DATA_PATH}/docker/jellyfin/config:/config
+      - ${NAS_DATA_PATH}/docker/jellyfin/cache:/cache
+      - ${NAS_DATA_PATH}/media:/media:ro
+    networks:
+      - nas-net
+
+networks:
+  nas-net:
+    driver: bridge

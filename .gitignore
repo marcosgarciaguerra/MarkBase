@@ -1,0 +1,10 @@
+.env
+.env.backup
+*.log
+
+# Datos del NAS (no versionar)
+/srv/
+
+# Caddy certs generados en runtime
+caddy/data/
+caddy/config/

@@ -1,0 +1,18 @@
+{
+	email admin@{$NAS_DOMAIN}
+}
+
+{$NEXTCLOUD_SUBDOMAIN}.{$NAS_DOMAIN} {
+	tls internal
+	reverse_proxy nextcloud:80
+}
+
+{$IMMICH_SUBDOMAIN}.{$NAS_DOMAIN} {
+	tls internal
+	reverse_proxy immich-server:2283
+}
+
+{$JELLYFIN_SUBDOMAIN}.{$NAS_DOMAIN} {
+	tls internal
+	reverse_proxy jellyfin:8096
+}
