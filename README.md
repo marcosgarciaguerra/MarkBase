@@ -75,8 +75,11 @@ Consulta [docs/network.md](docs/network.md) para más opciones de red.
 ### 7. Desplegar el stack
 
 ```bash
-docker compose up -d
+bash scripts/prepare-compose.sh
+bash scripts/up.sh
 ```
+
+El script `up.sh` levanta primero MariaDB y PostgreSQL, espera a que estén listos, y luego arranca el resto. Esto evita errores de dependencias.
 
 Verifica que todos los contenedores estén en ejecución:
 
@@ -172,7 +175,9 @@ MarkBase/
 │   ├── install-docker.sh     # Instala Docker + Tailscale
 │   ├── mount-data-disk.sh    # Monta disco de datos
 │   ├── backup-restic.sh      # Backup diario
-│   └── setup-backup-cron.sh  # Programa el cron
+│   ├── setup-backup-cron.sh  # Programa el cron
+│   ├── prepare-compose.sh    # Crea carpetas y valida .env
+│   └── up.sh                 # Arranque por fases (BDs primero)
 └── docs/
     ├── hardware.md           # Guía de hardware
     ├── network.md            # Red y acceso remoto
@@ -223,6 +228,34 @@ Consulta [docs/restore.md](docs/restore.md) para el procedimiento de restauraci�
 - Mantén el sistema actualizado: `sudo apt update && sudo apt upgrade`
 
 ## Solución de problemas
+
+### Error de dependencias (postgres / mariadb no listos)
+
+Suele ocurrir si las bases de datos aún no han terminado de inicializarse. Usa el arranque por fases:
+
+```bash
+bash scripts/prepare-compose.sh
+bash scripts/up.sh
+```
+
+Comprueba también:
+
+1. Que existe `.env` (copiado desde `.env.example`)
+2. Que las carpetas de datos existen (`NAS_DATA_PATH`, por defecto `/srv/nas`)
+3. Los logs de las bases de datos:
+
+```bash
+docker compose logs mariadb
+docker compose logs postgres
+```
+
+Si cambiaste la imagen de PostgreSQL y el contenedor crashea, borra el volumen corrupto (solo si es instalación nueva):
+
+```bash
+docker compose down
+sudo rm -rf /srv/nas/docker/postgres/*
+bash scripts/up.sh
+```
 
 ### Los servicios no arrancan
 

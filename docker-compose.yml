@@ -22,10 +22,11 @@ services:
 
   # ── Nextcloud ──────────────────────────────────────────
   mariadb:
-    image: mariadb:11
+    image: mariadb:11.4
     container_name: nas-mariadb
     restart: unless-stopped
     command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    env_file: .env
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -37,9 +38,10 @@ services:
       - nas-net
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
 
   redis-nextcloud:
     image: redis:7-alpine
@@ -52,9 +54,10 @@ services:
       - nas-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   nextcloud:
     image: nextcloud:29-apache
@@ -65,6 +68,7 @@ services:
         condition: service_healthy
       redis-nextcloud:
         condition: service_healthy
+    env_file: .env
     environment:
       MYSQL_HOST: mariadb
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -83,22 +87,34 @@ services:
 
   # ── Immich ─────────────────────────────────────────────
   postgres:
-    image: tensorchord/pgvecto-rs:pg16-v0.2.1
+    image: ghcr.io/immich-app/postgres:16-vectorchord0.4.3-pgvector0.8.1-pgvectors0.2.0
     container_name: nas-postgres
     restart: unless-stopped
+    env_file: .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: --data-checksums
     volumes:
       - ${NAS_DATA_PATH}/docker/postgres:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=vchord.so,vectors.so
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_wal_size=2GB
+    shm_size: 128mb
     networks:
       - nas-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
 
   redis-immich:
     image: redis:7-alpine
@@ -111,26 +127,29 @@ services:
       - nas-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   immich-server:
     image: ghcr.io/immich-app/immich-server:release
     container_name: nas-immich-server
     restart: unless-stopped
-    command: ["start.sh", "immich"]
     depends_on:
       postgres:
         condition: service_healthy
       redis-immich:
         condition: service_healthy
+    env_file: .env
     environment:
       DB_HOSTNAME: postgres
+      DB_PORT: 5432
       DB_USERNAME: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_DATABASE_NAME: ${POSTGRES_DB}
       REDIS_HOSTNAME: redis-immich
+      REDIS_PORT: 6379
       UPLOAD_LOCATION: /usr/src/app/upload
       IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
     volumes:
@@ -152,6 +171,7 @@ services:
     image: jellyfin/jellyfin:latest
     container_name: nas-jellyfin
     restart: unless-stopped
+    env_file: .env
     environment:
       TZ: ${TZ}
     volumes:
